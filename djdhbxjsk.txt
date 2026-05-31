@@ -16,186 +16,189 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local http_request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
 if not http_request then error("No HTTP support!") end
 
+-- ── CONFIG ──────────────────────────────────────────────────────────────────
 local MIN_GENERATION = 10
 local configFolder = "TricTracAj"
 local configPath   = configFolder .. "/config.json"
 
 local function saveConfig()
-pcall(function()
-if not isfolder(configFolder) then makefolder(configFolder) end
-local data = HttpService:JSONEncode({ minGeneration = MIN_GENERATION })
-writefile(configPath, data)
-end)
+    pcall(function()
+        if not isfolder(configFolder) then makefolder(configFolder) end
+        local data = HttpService:JSONEncode({ minGeneration = MIN_GENERATION })
+        writefile(configPath, data)
+    end)
 end
 
 local function loadConfig()
-pcall(function()
-if isfile(configPath) then
-local data = HttpService:JSONDecode(readfile(configPath))
-if type(data) == "table" then
-if data.minGeneration ~= nil then MIN_GENERATION = data.minGeneration end
-end
-end
-end)
+    pcall(function()
+        if isfile(configPath) then
+            local data = HttpService:JSONDecode(readfile(configPath))
+            if type(data) == "table" then
+                if data.minGeneration ~= nil then MIN_GENERATION = data.minGeneration end
+            end
+        end
+    end)
 end
 loadConfig()
 
+-- ── WIKI IMAGE FETCH ─────────────────────────────────────────────────────────
 local _LL_FANDOM_BASE = "https://stealabrainrot.fandom.com/wiki/"
 local _LL_imgCache    = {}
 
 local function _llRequestFn()
-return (syn and syn.request)
-or (http and http.request)
-or http_request
-or request
+    return (syn and syn.request)
+        or (http and http.request)
+        or http_request
+        or request
 end
 
-local function llUrlEncode(s)
-return (s:gsub("[^%w%-%.~]", function(c)
-return string.format("%%%02X", string.byte(c))
-end))
+local function _llUrlEncode(s)
+    return (s:gsub("[^%w%-_%.~]", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end))
 end
 
-local function llWikiCandidates(displayName)
-local clean = displayName:gsub("%[.-%]%s*", ""):gsub("^%s+", ""):gsub("%s+$", "")
-clean = clean:match("^(.-)%s*%(") or clean
-local seen, list = {}, {}
-local function add(s)
-if s and s ~= "" and not seen[s] then seen[s] = true; table.insert(list, s) end
-end
-add((clean:gsub(" ", "")))
-add(llUrlEncode(clean))
-add((displayName:gsub(" ", "")))
-add(llUrlEncode(displayName))
-return list
+local function _llWikiCandidates(displayName)
+    local clean = displayName:gsub("%[.-%]%s*", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    clean = clean:match("^(.-)%s*%(") or clean
+    local seen, list = {}, {}
+    local function add(s)
+        if s and s ~= "" and not seen[s] then seen[s] = true; table.insert(list, s) end
+    end
+    add((clean:gsub(" ", "_")))
+    add(_llUrlEncode(clean))
+    add((displayName:gsub(" ", "_")))
+    add(_llUrlEncode(displayName))
+    return list
 end
 
 local function _llFetchBody(requestFn, url)
-for attempt = 1, 3 do
-local ok, response = pcall(function()
-return requestFn({
-Url = url, Method = "GET",
-Headers = {
-["User-Agent"]      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-["Accept"]          = "text/html,application/xhtml+xml,application/xml;q=0.9,/;q=0.8",
-["Accept-Language"] = "en-US,en;q=0.5",
-["Cache-Control"]   = "no-cache",
-},
-Timeout = 10,
-})
-end)
-if ok and response and response.StatusCode == 200 and response.Body and response.Body ~= "" then
-return response.Body
-end
-if ok and response and response.StatusCode and response.StatusCode ~= 200 then
-return nil
-end
-if attempt < 3 then task.wait(0.5 * attempt) end
-end
-return nil
+    for attempt = 1, 3 do
+        local ok, response = pcall(function()
+            return requestFn({
+                Url = url, Method = "GET",
+                Headers = {
+                    ["User-Agent"]      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    ["Accept"]          = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    ["Accept-Language"] = "en-US,en;q=0.5",
+                    ["Cache-Control"]   = "no-cache",
+                },
+                Timeout = 10,
+            })
+        end)
+        if ok and response and response.StatusCode == 200 and response.Body and response.Body ~= "" then
+            return response.Body
+        end
+        if ok and response and response.StatusCode and response.StatusCode ~= 200 then
+            return nil
+        end
+        if attempt < 3 then task.wait(0.5 * attempt) end
+    end
+    return nil
 end
 
 local function _llFetchFandomImage(displayName)
-if _LL_imgCache[displayName] ~= nil then
-return _LL_imgCache[displayName] or nil
-end
-local ok, body = pcall(function()
-local apiUrl = "https://stealabrainrot.fandom.com/api.php"
-.. "?action=query&prop=pageimages&format=json&pithumbsize=256&titles="
-.. (displayName:gsub(" ", ""))
-local fn = _llRequestFn()
-if fn then
-local r = fn({ Url = apiUrl, Method = "GET",
-Headers = { ["User-Agent"] = "Mozilla/5.0" }, Timeout = 8 })
-return (r and r.StatusCode == 200) and r.Body or nil
-end
-return HttpService:GetAsync(apiUrl)
-end)
-if ok and body then
-local thumb = body:match('"source":"(https://[^"]+)"')
-or body:match('"url":"(https://static%.wikia%.nocookie%.net[^"]+)"')
-if thumb then
-thumb = thumb:gsub("\/", "/"):gsub("&", "&")
-_LL_imgCache[displayName] = thumb
-return thumb
-end
-end
-local requestFn = _llRequestFn()
-if requestFn then
-for _, slug in ipairs(llWikiCandidates(displayName)) do
-local pageBody = _llFetchBody(requestFn, _LL_FANDOM_BASE .. slug)
-if pageBody then
-local og = pageBody:match('property="og:image"%s+content="([^"]+)"')
-or pageBody:match('content="([^"]+)"%s+property="og:image"')
-or pageBody:match('<meta%s+property="og:image"%s+content="([^"]+)"')
-if og and og ~= "" then
-og = og:gsub("&", "&"):gsub(""", '"')
-if og:find("^https?://") then
-_LL_imgCache[displayName] = og
-return og
-end
-end
-for _, attr in ipairs({ "data%-src", "src" }) do
-local last
-for _, ext in ipairs({ "png", "jpg", "jpeg", "webp" }) do
-local pat = attr .. '="(https://[^"]+%.' .. ext .. '[^"]*)"'
-for u in pageBody:gmatch(pat) do
-if u:find("static%.wikia%.nocookie%.net")
-and not u:find("/scale%-to%-width%-down/%d%d?$") then
-last = u
-end
-end
-end
-if last then
-last = last:gsub("/revision/latest", "")
-_LL_imgCache[displayName] = last
-return last
-end
-end
-end
-end
-end
-_LL_imgCache[displayName] = false
-return nil
+    if _LL_imgCache[displayName] ~= nil then
+        return _LL_imgCache[displayName] or nil
+    end
+    local ok, body = pcall(function()
+        local apiUrl = "https://stealabrainrot.fandom.com/api.php"
+            .. "?action=query&prop=pageimages&format=json&pithumbsize=256&titles="
+            .. (displayName:gsub(" ", "_"))
+        local fn = _llRequestFn()
+        if fn then
+            local r = fn({ Url = apiUrl, Method = "GET",
+                Headers = { ["User-Agent"] = "Mozilla/5.0" }, Timeout = 8 })
+            return (r and r.StatusCode == 200) and r.Body or nil
+        end
+        return HttpService:GetAsync(apiUrl)
+    end)
+    if ok and body then
+        local thumb = body:match('"source":"(https://[^"]+)"')
+            or body:match('"url":"(https://static%.wikia%.nocookie%.net[^"]+)"')
+        if thumb then
+            thumb = thumb:gsub("\\/", "/"):gsub("&amp;", "&")
+            _LL_imgCache[displayName] = thumb
+            return thumb
+        end
+    end
+    local requestFn = _llRequestFn()
+    if requestFn then
+        for _, slug in ipairs(_llWikiCandidates(displayName)) do
+            local pageBody = _llFetchBody(requestFn, _LL_FANDOM_BASE .. slug)
+            if pageBody then
+                local og = pageBody:match('property="og:image"%s+content="([^"]+)"')
+                    or pageBody:match('content="([^"]+)"%s+property="og:image"')
+                    or pageBody:match('<meta%s+property="og:image"%s+content="([^"]+)"')
+                if og and og ~= "" then
+                    og = og:gsub("&amp;", "&"):gsub("&quot;", '"')
+                    if og:find("^https?://") then
+                        _LL_imgCache[displayName] = og
+                        return og
+                    end
+                end
+                for _, attr in ipairs({ "data%-src", "src" }) do
+                    local last
+                    for _, ext in ipairs({ "png", "jpg", "jpeg", "webp" }) do
+                        local pat = attr .. '="(https://[^"]+%.' .. ext .. '[^"]*)"'
+                        for u in pageBody:gmatch(pat) do
+                            if u:find("static%.wikia%.nocookie%.net")
+                                and not u:find("/scale%-to%-width%-down/%d%d?$") then
+                                last = u
+                            end
+                        end
+                    end
+                    if last then
+                        last = last:gsub("/revision/latest", "")
+                        _LL_imgCache[displayName] = last
+                        return last
+                    end
+                end
+            end
+        end
+    end
+    _LL_imgCache[displayName] = false
+    return nil
 end
 
 local LocalPlayer = Players.LocalPlayer
 
 local function getImageForBrainrot(brainrotName)
-local wikiImg = _llFetchFandomImage(brainrotName)
-if wikiImg then return wikiImg end
-return "https://www.roblox.com/headshot-thumbnail/image?userId="
-.. tostring(LocalPlayer.UserId)
-.. "&width=420&height=420&format=png"
+    local wikiImg = _llFetchFandomImage(brainrotName)
+    if wikiImg then return wikiImg end
+    return "https://www.roblox.com/headshot-thumbnail/image?userId="
+        .. tostring(LocalPlayer.UserId)
+        .. "&width=420&height=420&format=png"
 end
 
+-- ── WEBSOCKET ────────────────────────────────────────────────────────────────
 local ws = nil
 local function connectWebSocket()
-if ws then return end
-local success, sock = pcall(function()
-if WebSocket then return WebSocket.connect(WS_URL) end
-if syn and syn.websocket then return syn.websocket.connect(WS_URL) end
-if fluxus and fluxus.websocket then return fluxus.websocket.connect(WS_URL) end
-if websocket and websocket.connect then return websocket.connect(WS_URL) end
-return nil
-end)
-if not success or not sock then return end
-ws = sock
-if ws.OnClose and ws.OnClose.Connect then
-ws.OnClose:Connect(function()
-ws = nil
-task.wait(1)
-connectWebSocket()
-end)
-end
+    if ws then return end
+    local success, sock = pcall(function()
+        if WebSocket then return WebSocket.connect(WS_URL) end
+        if syn and syn.websocket then return syn.websocket.connect(WS_URL) end
+        if fluxus and fluxus.websocket then return fluxus.websocket.connect(WS_URL) end
+        if websocket and websocket.connect then return websocket.connect(WS_URL) end
+        return nil
+    end)
+    if not success or not sock then return end
+    ws = sock
+    if ws.OnClose and ws.OnClose.Connect then
+        ws.OnClose:Connect(function()
+            ws = nil
+            task.wait(1)
+            connectWebSocket()
+        end)
+    end
 end
 
 local function buildJoinLink(placeId, jobId)
-return string.format(
-"https://chillihub1.github.io/chillihub-joiner/?placeId=%d&gameInstanceId=%s",
-placeId,
-jobId
-)
+    return string.format(
+        "https://chillihub1.github.io/chillihub-joiner/?placeId=%d&gameInstanceId=%s",
+        placeId,
+        jobId
+    )
 end
 
 local USERNAME = Players.LocalPlayer.Name
@@ -203,395 +206,398 @@ print("TRIC TRAC AJ: Worker = " .. USERNAME)
 
 if setfpscap then setfpscap(20) end
 task.spawn(function()
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.Brightness    = 0
+        Lighting.FogEnd        = 1
+        task.wait(0.1)
+        for _, effect in ipairs(Lighting:GetChildren()) do
+            if effect:IsA("PostEffect") or effect:IsA("Atmosphere") or effect:IsA("Sky") then
+                pcall(function() effect:Destroy() end)
+            end
+        end
+    end)
+    task.wait(0.1)
+    pcall(function()
+        local t = workspace.Terrain
+        t.WaterWaveSize = 0; t.WaterWaveSpeed = 0
+        t.WaterTransparency = 1; t.Decoration = false
+    end)
+    task.wait(0.1)
+    pcall(function() RunService:Set3dRenderingEnabled(false) end)
+end)
 pcall(function()
-Lighting.GlobalShadows = false
-Lighting.Brightness    = 0
-Lighting.FogEnd        = 1
-task.wait(0.1)
-for _, effect in ipairs(Lighting:GetChildren()) do
-if effect:IsA("PostEffect") or effect:IsA("Atmosphere") or effect:IsA("Sky") then
-pcall(function() effect:Destroy() end)
-end
-end
-end)
-task.wait(0.1)
-pcall(function()
-local t = workspace.Terrain
-t.WaterWaveSize = 0; t.WaterWaveSpeed = 0
-t.WaterTransparency = 1; t.Decoration = false
-end)
-task.wait(0.1)
-pcall(function() RunService:Set3dRenderingEnabled(false) end)
-end)
-pcall(function()
-CoreGui.RobloxPromptGui.ChildAdded:Connect(function(c)
-task.delay(0.1, function() pcall(function() c:Destroy() end) end)
-end)
+    CoreGui.RobloxPromptGui.ChildAdded:Connect(function(c)
+        task.delay(0.1, function() pcall(function() c:Destroy() end) end)
+    end)
 end)
 
 local PRIORITY_LIST = {
-"Strawberry Elephant","Meowl","Skibidi Toilet","Headless Horseman",
-"Dragon Gingerini","Dragon Cannelloni","Ketupat Bros","Hydra Dragon Cannelloni",
-"La Supreme Combinasion","Love Love Bear","Ginger Gerat","Cerberus",
-"Capitano Moby","La Casa Boo","Burguro and Fryuro","Spooky and Pumpky",
-"Cooki and Milki","Rosey and Teddy","Popcuru and Fizzuru","Reinito Sleighito",
-"Fragrama and Chocrama","Garama and Madundung","Ketchuru and Musturu",
-"La Secret Combinasion","Tralaledon","Tictac Sahur","Ketupat Kepat",
-"Tang Tang Keletang","Orcaledon","La Ginger Sekolah","Los Spaghettis",
-"Lavadorito Spinito","Swaggy Bros","La Taco Combinasion","Los Primos",
-"Chillin Chili","Tuff Toucan","W or L","Chipso and Queso"
+    "Strawberry Elephant","Meowl","Skibidi Toilet","Headless Horseman",
+    "Dragon Gingerini","Dragon Cannelloni","Ketupat Bros","Hydra Dragon Cannelloni",
+    "La Supreme Combinasion","Love Love Bear","Ginger Gerat","Cerberus",
+    "Capitano Moby","La Casa Boo","Burguro and Fryuro","Spooky and Pumpky",
+    "Cooki and Milki","Rosey and Teddy","Popcuru and Fizzuru","Reinito Sleighito",
+    "Fragrama and Chocrama","Garama and Madundung","Ketchuru and Musturu",
+    "La Secret Combinasion","Tralaledon","Tictac Sahur","Ketupat Kepat",
+    "Tang Tang Keletang","Orcaledon","La Ginger Sekolah","Los Spaghettis",
+    "Lavadorito Spinito","Swaggy Bros","La Taco Combinasion","Los Primos",
+    "Chillin Chili","Tuff Toucan","W or L","Chipso and Queso"
 }
 
 local function getPriority(name)
-for i,v in ipairs(PRIORITY_LIST) do if v==name then return i end end
-return 999
+    for i,v in ipairs(PRIORITY_LIST) do if v==name then return i end end
+    return 999
 end
 
 local function formatValue(num)
-if num>=1e15 then return string.format('%.2fQ',num/1e15)
-elseif num>=1e12 then return string.format('%.2fT',num/1e12)
-elseif num>=1e9 then return string.format('%.2fB',num/1e9)
-elseif num>=1e6 then return string.format('%.2fM',num/1e6)
-elseif num>=1e3 then return string.format('%.2fK',num/1e3)
-else return tostring(math.floor(num)) end
+    if num>=1e15 then return string.format('%.2fQ',num/1e15)
+    elseif num>=1e12 then return string.format('%.2fT',num/1e12)
+    elseif num>=1e9 then return string.format('%.2fB',num/1e9)
+    elseif num>=1e6 then return string.format('%.2fM',num/1e6)
+    elseif num>=1e3 then return string.format('%.2fK',num/1e3)
+    else return tostring(math.floor(num)) end
 end
 
 local duelBases   = {}
 local duelPlayers = {}
 
 local function IsPlayerInDuel(player)
-if not player then return false end
-return player:GetAttribute("__duels_block_steal") == true
+    if not player then return false end
+    return player:GetAttribute("__duels_block_steal") == true
 end
 
 local function DetectDuelBases()
-duelBases = {}; duelPlayers = {}
-local Plots = workspace:FindFirstChild("Plots")
-if not Plots then return end
-for _, plot in ipairs(Plots:GetChildren()) do
-local sign = plot:FindFirstChild("PlotSign")
-if not sign then continue end
-local textLabel = sign:FindFirstChild("SurfaceGui")
-and sign.SurfaceGui:FindFirstChild("Frame")
-and sign.SurfaceGui.Frame:FindFirstChild("TextLabel")
-local baseText = textLabel and textLabel.Text or nil
-if not baseText or baseText == "Empty Base" then continue end
-local nickname = baseText:match("^(.-)'") or baseText
-local ownerPlayer = nil
-for _, p in ipairs(Players:GetPlayers()) do
-if p.DisplayName == nickname or p.Name == nickname then ownerPlayer = p; break end
-end
-if ownerPlayer and IsPlayerInDuel(ownerPlayer) then
-duelBases[plot.Name] = {plot=plot, owner=ownerPlayer, ownerName=ownerPlayer.Name}
-duelPlayers[ownerPlayer.UserId] = true
-end
-end
+    duelBases = {}; duelPlayers = {}
+    local Plots = workspace:FindFirstChild("Plots")
+    if not Plots then return end
+    for _, plot in ipairs(Plots:GetChildren()) do
+        local sign = plot:FindFirstChild("PlotSign")
+        if not sign then continue end
+        local textLabel = sign:FindFirstChild("SurfaceGui")
+            and sign.SurfaceGui:FindFirstChild("Frame")
+            and sign.SurfaceGui.Frame:FindFirstChild("TextLabel")
+        local baseText = textLabel and textLabel.Text or nil
+        if not baseText or baseText == "Empty Base" then continue end
+        local nickname = baseText:match("^(.-)'") or baseText
+        local ownerPlayer = nil
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.DisplayName == nickname or p.Name == nickname then ownerPlayer = p; break end
+        end
+        if ownerPlayer and IsPlayerInDuel(ownerPlayer) then
+            duelBases[plot.Name] = {plot=plot, owner=ownerPlayer, ownerName=ownerPlayer.Name}
+            duelPlayers[ownerPlayer.UserId] = true
+        end
+    end
 end
 
 task.spawn(function()
-while true do pcall(DetectDuelBases); task.wait(2) end
+    while true do pcall(DetectDuelBases); task.wait(2) end
 end)
 
 local function getPlotOwnerName(plotFolder)
-local ok, result = pcall(function()
-local sign = plotFolder:FindFirstChild("PlotSign")
-if not sign then return nil end
-local sg = sign:FindFirstChild("SurfaceGui")
-local fr = sg and sg:FindFirstChild("Frame")
-local tl = fr and fr:FindFirstChild("TextLabel")
-if not tl or tl.Text == "" then return nil end
-local nickname = tl.Text:match("^(.-)'") or tl.Text
-for _, p in ipairs(Players:GetPlayers()) do
-if p.DisplayName == nickname or p.Name == nickname then return p.Name end
-end
-return nickname
-end)
-return ok and result or nil
+    local ok, result = pcall(function()
+        local sign = plotFolder:FindFirstChild("PlotSign")
+        if not sign then return nil end
+        local sg = sign:FindFirstChild("SurfaceGui")
+        local fr = sg and sg:FindFirstChild("Frame")
+        local tl = fr and fr:FindFirstChild("TextLabel")
+        if not tl or tl.Text == "" then return nil end
+        local nickname = tl.Text:match("^(.-)'") or tl.Text
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.DisplayName == nickname or p.Name == nickname then return p.Name end
+        end
+        return nickname
+    end)
+    return ok and result or nil
 end
 
 local function isPlotInDuel(plotFolder)
-if not plotFolder then return false end
-if duelBases[plotFolder.Name] then return true end
-local ownerName = getPlotOwnerName(plotFolder)
-if not ownerName then return false end
-for _, p in ipairs(Players:GetPlayers()) do
-if p.Name == ownerName or p.DisplayName == ownerName then
-return duelPlayers[p.UserId] == true or IsPlayerInDuel(p)
-end
-end
-return false
+    if not plotFolder then return false end
+    if duelBases[plotFolder.Name] then return true end
+    local ownerName = getPlotOwnerName(plotFolder)
+    if not ownerName then return false end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Name == ownerName or p.DisplayName == ownerName then
+            return duelPlayers[p.UserId] == true or IsPlayerInDuel(p)
+        end
+    end
+    return false
 end
 
 local function parseMoneyPerSec(text)
-if not text or not text:find("/s") then return 0 end
-text = text:gsub("%$",""):gsub("/s",""):gsub("%s+","")
-local mult = text:find("[Tt]") and 1e12 or text:find("[Bb]") and 1e9
-or text:find("[Mm]") and 1e6 or text:find("[Kk]") and 1e3 or 1
-text = text:gsub("[KkMmBbTt]","")
-return (tonumber(text) or 0) * mult
+    if not text or not text:find("/s") then return 0 end
+    text = text:gsub("%$",""):gsub("/s",""):gsub("%s+","")
+    local mult = text:find("[Tt]") and 1e12 or text:find("[Bb]") and 1e9
+              or text:find("[Mm]") and 1e6 or text:find("[Kk]") and 1e3 or 1
+    text = text:gsub("[KkMmBbTt]","")
+    return (tonumber(text) or 0) * mult
 end
 
 local function getUsernameFromDisplayName(dn)
-for _, p in pairs(Players:GetPlayers()) do
-if p.DisplayName==dn or p.Name==dn then return p.Name end
-end
-return nil
+    for _, p in pairs(Players:GetPlayers()) do
+        if p.DisplayName==dn or p.Name==dn then return p.Name end
+    end
+    return nil
 end
 
 local function getUsernameFromPlot(plot)
-local ok, r = pcall(function()
-if plot:FindFirstChild("Owner") then
-local o = plot.Owner
-if o:IsA("StringValue") then return o.Value end
-if o:IsA("ObjectValue") and o.Value then return o.Value.Name end
-end
-return plot:GetAttribute("Owner") or plot:GetAttribute("OwnerName") or nil
-end)
-return ok and r or nil
+    local ok, r = pcall(function()
+        if plot:FindFirstChild("Owner") then
+            local o = plot.Owner
+            if o:IsA("StringValue") then return o.Value end
+            if o:IsA("ObjectValue") and o.Value then return o.Value.Name end
+        end
+        return plot:GetAttribute("Owner") or plot:GetAttribute("OwnerName") or nil
+    end)
+    return ok and r or nil
 end
 
 local function getPlotOwnerInfo(plotId)
-local ok, r = pcall(function()
-local plot = workspace.Plots:FindFirstChild(plotId)
-if not plot then return nil end
-local sign = plot:FindFirstChild("PlotSign")
-if sign then
-local tl = sign:FindFirstChild("SurfaceGui")
-and sign.SurfaceGui:FindFirstChild("Frame")
-and sign.SurfaceGui.Frame:FindFirstChild("TextLabel")
-if tl and tl.Text ~= "" then
-local dn = tl.Text:gsub("'s [Bb]ase",""):gsub("'s [Pp]lot",""):match("^%s*(.-)%s*$")
-if dn ~= "" then return getUsernameFromDisplayName(dn) or getUsernameFromPlot(plot) or dn end
-end
-end
-return getUsernameFromPlot(plot)
-end)
-return ok and r or nil
+    local ok, r = pcall(function()
+        local plot = workspace.Plots:FindFirstChild(plotId)
+        if not plot then return nil end
+        local sign = plot:FindFirstChild("PlotSign")
+        if sign then
+            local tl = sign:FindFirstChild("SurfaceGui")
+                and sign.SurfaceGui:FindFirstChild("Frame")
+                and sign.SurfaceGui.Frame:FindFirstChild("TextLabel")
+            if tl and tl.Text ~= "" then
+                local dn = tl.Text:gsub("'s [Bb]ase",""):gsub("'s [Pp]lot",""):match("^%s*(.-)%s*$")
+                if dn ~= "" then return getUsernameFromDisplayName(dn) or getUsernameFromPlot(plot) or dn end
+            end
+        end
+        return getUsernameFromPlot(plot)
+    end)
+    return ok and r or nil
 end
 
 local function findOwnerForBrainrot(obj)
-local cur = obj.Parent
-while cur and cur ~= workspace do
-if cur.Parent and cur.Parent.Name == "Plots" then
-return getPlotOwnerInfo(cur.Name) or "Unknown"
-end
-cur = cur.Parent
-end
-return "Unknown"
+    local cur = obj.Parent
+    while cur and cur ~= workspace do
+        if cur.Parent and cur.Parent.Name == "Plots" then
+            return getPlotOwnerInfo(cur.Name) or "Unknown"
+        end
+        cur = cur.Parent
+    end
+    return "Unknown"
 end
 
 local function findPlotFolderForBrainrot(obj)
-local cur = obj.Parent
-while cur and cur ~= workspace do
-if cur.Parent and cur.Parent.Name == "Plots" then return cur end
-cur = cur.Parent
-end
-return nil
+    local cur = obj.Parent
+    while cur and cur ~= workspace do
+        if cur.Parent and cur.Parent.Name == "Plots" then return cur end
+        cur = cur.Parent
+    end
+    return nil
 end
 
 local function getMutationFromObject(parent)
-if not parent then return "None" end
-local rawMut = (parent:FindFirstChild("Mutation")
-and parent.Mutation.Visible and parent.Mutation.Text) or nil
-if rawMut then
-local m = rawMut:gsub("<[^>]+>", ""):gsub("%s+", " "):match("^%s*(.-)%s*$")
-if m:lower():find("yin") and m:lower():find("yang") then m = "YinYang" end
-if m ~= "" then return m end
-end
-local mutAttr = parent:GetAttribute("Mutation")
-if mutAttr and mutAttr ~= "" then
-return tostring(mutAttr)
-end
-return "None"
+    if not parent then return "None" end
+    -- Try visible Mutation label
+    local rawMut = (parent:FindFirstChild("Mutation")
+                   and parent.Mutation.Visible and parent.Mutation.Text) or nil
+    if rawMut then
+        local m = rawMut:gsub("<[^>]+>", ""):gsub("%s+", " "):match("^%s*(.-)%s*$")
+        if m:lower():find("yin") and m:lower():find("yang") then m = "YinYang" end
+        if m ~= "" then return m end
+    end
+    -- Try animalData-style Mutation attribute
+    local mutAttr = parent:GetAttribute("Mutation")
+    if mutAttr and mutAttr ~= "" then
+        return tostring(mutAttr)
+    end
+    return "None"
 end
 
 local function scanAllBrainrots()
-local detections = {}
-local descendants = workspace:GetDescendants()
-local batchSize = 100 
-for i = 1, #descendants, batchSize do
-local batchEnd = math.min(i + batchSize - 1, #descendants)
-for j = i, batchEnd do
-local obj = descendants[j]
-local isGenLabel = obj:IsA("TextLabel") and (
-obj.Name == "Generation" or obj.Name == "MoneyPerSec" or
-obj.Name == "Income" or obj.Name == "GenLabel" or
-obj.Name == "GenerationLabel" or
-(obj.Text and obj.Text:find("/s") and obj.Text:find("%$"))
-)
-if isGenLabel then
-local moneyValue = parseMoneyPerSec(obj.Text)
-local moneyM = moneyValue / 1e6
-if moneyM >= MIN_GENERATION then
-local parent = obj.Parent
-local name = "Unknown"
-local JUNK_NAMES = {AnimalOverhead=true, Base=true, Spawn=true, Model=true, Part=true, Handle=true}
-if parent then
-local dn = parent:FindFirstChild("DisplayName")
-if dn and dn:IsA("TextLabel") and dn.Text ~= "" and not JUNK_NAMES[dn.Text] then
-name = dn.Text
-elseif parent:FindFirstChild("BrainrotName") and parent.BrainrotName.Value ~= "" then
-name = parent.BrainrotName.Value
-elseif parent:FindFirstChild("Title") and parent.Title:IsA("TextLabel") and parent.Title.Text ~= "" and not JUNK_NAMES[parent.Title.Text] then
-name = parent.Title.Text
-elseif not JUNK_NAMES[parent.Name] then
-name = parent.Name
-elseif parent.Parent and not JUNK_NAMES[parent.Parent.Name] and parent.Parent ~= workspace then
-name = parent.Parent.Name
-end
-end
-local mutation = getMutationFromObject(parent)
-local owner = findOwnerForBrainrot(obj)
-local isDuel = false
-local plotFolder = findPlotFolderForBrainrot(obj)
-if plotFolder then isDuel = isPlotInDuel(plotFolder) end
-table.insert(detections, {name=name, generation=obj.Text, genM=moneyM, mutation=mutation, owner=owner, isDuel=isDuel})
-end
-end
-end
-end
-table.sort(detections, function(a,b) return a.genM > b.genM end)
-local best = nil
-for _, d in ipairs(detections) do
-d.priority = getPriority(d.name)
-if best == nil then best = d
-elseif d.priority < best.priority then best = d
-elseif d.priority == best.priority and d.genM > best.genM then best = d
-end
-end
-return detections, best
+    local detections = {}
+    local descendants = workspace:GetDescendants()
+    local batchSize = 50
+    for i = 1, #descendants, batchSize do
+        local batchEnd = math.min(i + batchSize - 1, #descendants)
+        for j = i, batchEnd do
+            local obj = descendants[j]
+            local isGenLabel = obj:IsA("TextLabel") and (
+                obj.Name == "Generation" or obj.Name == "MoneyPerSec" or
+                obj.Name == "Income" or obj.Name == "GenLabel" or
+                obj.Name == "GenerationLabel" or
+                (obj.Text and obj.Text:find("/s") and obj.Text:find("%$"))
+            )
+            if isGenLabel then
+                local moneyValue = parseMoneyPerSec(obj.Text)
+                local moneyM = moneyValue / 1e6
+                if moneyM >= MIN_GENERATION then
+                    local parent = obj.Parent
+                    local name = "Unknown"
+                    local JUNK_NAMES = {AnimalOverhead=true, Base=true, Spawn=true, Model=true, Part=true, Handle=true}
+                    if parent then
+                        local dn = parent:FindFirstChild("DisplayName")
+                        if dn and dn:IsA("TextLabel") and dn.Text ~= "" and not JUNK_NAMES[dn.Text] then
+                            name = dn.Text
+                        elseif parent:FindFirstChild("BrainrotName") and parent.BrainrotName.Value ~= "" then
+                            name = parent.BrainrotName.Value
+                        elseif parent:FindFirstChild("Title") and parent.Title:IsA("TextLabel") and parent.Title.Text ~= "" and not JUNK_NAMES[parent.Title.Text] then
+                            name = parent.Title.Text
+                        elseif not JUNK_NAMES[parent.Name] then
+                            name = parent.Name
+                        elseif parent.Parent and not JUNK_NAMES[parent.Parent.Name] and parent.Parent ~= workspace then
+                            name = parent.Parent.Name
+                        end
+                    end
+                    local mutation = getMutationFromObject(parent)
+                    local owner = findOwnerForBrainrot(obj)
+                    local isDuel = false
+                    local plotFolder = findPlotFolderForBrainrot(obj)
+                    if plotFolder then isDuel = isPlotInDuel(plotFolder) end
+                    table.insert(detections, {name=name, generation=obj.Text, genM=moneyM, mutation=mutation, owner=owner, isDuel=isDuel})
+                end
+            end
+        end
+        if i % (batchSize * 2) == 0 then task.wait(0.01) end
+    end
+    table.sort(detections, function(a,b) return a.genM > b.genM end)
+    local best = nil
+    for _, d in ipairs(detections) do
+        d.priority = getPriority(d.name)
+        if best == nil then best = d
+        elseif d.priority < best.priority then best = d
+        elseif d.priority == best.priority and d.genM > best.genM then best = d
+        end
+    end
+    return detections, best
 end
 
 local function sendDiscord(allHits, best, serverId)
-if not best then return end
-task.spawn(function()
-pcall(function()
-local joinLink = buildJoinLink(game.PlaceId, serverId)
-local thumbUrl = getImageForBrainrot(best.name)
-local extraBrainrots = {}
-local totalVal = 0
-for i, h in ipairs(allHits) do
-totalVal = totalVal + ((h.genM or 0) * 1e6)
-if i > 1 and #extraBrainrots < 7 then
-local line = h.name .. " | " .. h.generation
-if h.mutation and h.mutation ~= "None" then line = line .. " | 🧬 " .. h.mutation end
-if h.owner and h.owner ~= "Unknown" then line = line .. " | @" .. h.owner end
-if h.isDuel then line = line .. " | DUEL" end
-table.insert(extraBrainrots, line)
-end
-end
-local brainrotsList = best.name .. " | " .. best.generation
-if best.mutation and best.mutation ~= "None" then brainrotsList = brainrotsList .. " | 🧬 " .. best.mutation end
-if best.owner and best.owner ~= "Unknown" then brainrotsList = brainrotsList .. " | @" .. best.owner end
-if best.isDuel then brainrotsList = brainrotsList .. " | DUEL" end
-if #extraBrainrots > 0 then brainrotsList = brainrotsList .. "\n" .. table.concat(extraBrainrots, "\n") end
-local players = #Players:GetPlayers() .. "/" .. Players.MaxPlayers
-local titleField = "🎭 All Brainrots ( >" .. formatValue(MIN_GENERATION * 1e6) .. "/s )"
-http_request({
-Url = WEBHOOK_URL, Method = "POST",
-Headers = {["Content-Type"] = "application/json"},
-Body = HttpService:JSONEncode({
-username = "Tric Trac AJ",
-avatar_url = "",
-embeds = {{
-title = "🙈 Brainrot Notify",
-color = 5763719,
-thumbnail = { url = thumbUrl },
-fields = {
-{ name = "🏷️ Name", value = tostring(best.name), inline = true },
-{ name = "💰 Money per sec", value = tostring(best.generation), inline = true },
-{ name = "👥 Players", value = tostring(players), inline = true },
-{ name = "🧬 Mutation", value = tostring(best.mutation or "None"), inline = true },
-{ name = "💎 Total Value", value = tostring(formatValue(totalVal)) .. "/s", inline = true },
-{ name = titleField, value = "\n" .. brainrotsList .. "\n", inline = false },
-{ name = "🔗 Join Server", value = "[Click to join](" .. joinLink .. ")", inline = false },
-},
-footer = { text = "Tric Trac AJ | v1" },
-timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-}},
-}),
-})
-print("TRIC TRAC AJ: Discord sent -> " .. best.name)
-end)
-end)
+    if not best then return end
+    task.spawn(function()
+        pcall(function()
+            local joinLink = buildJoinLink(game.PlaceId, serverId)
+            local thumbUrl = getImageForBrainrot(best.name)
+            local extraBrainrots = {}
+            local totalVal = 0
+            for i, h in ipairs(allHits) do
+                totalVal = totalVal + ((h.genM or 0) * 1e6)
+                if i > 1 and #extraBrainrots < 7 then
+                    local line = h.name .. " | " .. h.generation
+                    if h.mutation and h.mutation ~= "None" then line = line .. " | 🧬 " .. h.mutation end
+                    if h.owner and h.owner ~= "Unknown" then line = line .. " | @" .. h.owner end
+                    if h.isDuel then line = line .. " | DUEL" end
+                    table.insert(extraBrainrots, line)
+                end
+            end
+            local brainrotsList = best.name .. " | " .. best.generation
+            if best.mutation and best.mutation ~= "None" then brainrotsList = brainrotsList .. " | 🧬 " .. best.mutation end
+            if best.owner and best.owner ~= "Unknown" then brainrotsList = brainrotsList .. " | @" .. best.owner end
+            if best.isDuel then brainrotsList = brainrotsList .. " | DUEL" end
+            if #extraBrainrots > 0 then brainrotsList = brainrotsList .. "\n" .. table.concat(extraBrainrots, "\n") end
+            local players = #Players:GetPlayers() .. "/" .. Players.MaxPlayers
+            local titleField = "🎭 All Brainrots ( >" .. formatValue(MIN_GENERATION * 1e6) .. "/s )"
+            http_request({
+                Url = WEBHOOK_URL, Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode({
+                    username = "Tric Trac AJ",
+                    avatar_url = "",
+                    embeds = {{
+                        title = "🙈 Brainrot Notify",
+                        color = 5763719,
+                        thumbnail = { url = thumbUrl },
+                        fields = {
+                            { name = "🏷️ Name", value = tostring(best.name), inline = true },
+                            { name = "💰 Money per sec", value = tostring(best.generation), inline = true },
+                            { name = "👥 Players", value = tostring(players), inline = true },
+                            { name = "🧬 Mutation", value = tostring(best.mutation or "None"), inline = true },
+                            { name = "💎 Total Value", value = tostring(formatValue(totalVal)) .. "/s", inline = true },
+                            { name = titleField, value = "```\n" .. brainrotsList .. "\n```", inline = false },
+                            { name = "🔗 Join Server", value = "[Click to join](" .. joinLink .. ")", inline = false },
+                        },
+                        footer = { text = "Tric Trac AJ | v1" },
+                        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+                    }},
+                }),
+            })
+            print("TRIC TRAC AJ: Discord sent -> " .. best.name)
+        end)
+    end)
 end
 
 local function sendWebSocket(best, serverId)
-if not best then return end
-if not ws then connectWebSocket() end
-if not ws then return end
-pcall(function()
-local currentJobId = serverId or game.JobId
-local joinLink = buildJoinLink(game.PlaceId, currentJobId)
-local players = #Players:GetPlayers() .. "/" .. Players.MaxPlayers
-local data = HttpService:JSONEncode({
-brainrot = best.name,
-generation = best.generation,
-mutation = best.mutation or "None",
-players = players,
-jobId = currentJobId,
-joinLink = joinLink,
-})
-ws:Send(data)
-print("TRIC TRAC AJ: WS sent -> " .. best.name)
-end)
+    if not best then return end
+    if not ws then connectWebSocket() end
+    if not ws then return end
+    pcall(function()
+        local currentJobId = serverId or game.JobId
+        local joinLink = buildJoinLink(game.PlaceId, currentJobId)
+        local players = #Players:GetPlayers() .. "/" .. Players.MaxPlayers
+        local data = HttpService:JSONEncode({
+            brainrot = best.name,
+            generation = best.generation,
+            mutation = best.mutation or "None",
+            players = players,
+            jobId = currentJobId,
+            joinLink = joinLink,
+        })
+        ws:Send(data)
+        print("TRIC TRAC AJ: WS sent -> " .. best.name)
+    end)
 end
 
 local function isStuckOnLoading()
-if not game:IsLoaded() then return true end
-if not Players.LocalPlayer then return true end
-if not Players.LocalPlayer.Character then return true end
-if #workspace:GetChildren() < 5 then return true end
-return false
+    if not game:IsLoaded() then return true end
+    if not Players.LocalPlayer then return true end
+    if not Players.LocalPlayer.Character then return true end
+    if #workspace:GetChildren() < 5 then return true end
+    return false
 end
 
 local function waitForGameLoad(maxWait)
-maxWait = maxWait or 15
-local t = tick()
-repeat
-if tick()-t > maxWait then return false end
-task.wait(0.1)
-until game:IsLoaded() and Players.LocalPlayer and Players.LocalPlayer.Character
-local t2 = tick()
-repeat
-if tick()-t2 > 5 then return false end
-task.wait(0.1)
-until #workspace:GetChildren() >= 5
-return true
+    maxWait = maxWait or 15
+    local t = tick()
+    repeat
+        if tick()-t > maxWait then return false end
+        task.wait(0.1)
+    until game:IsLoaded() and Players.LocalPlayer and Players.LocalPlayer.Character
+    local t2 = tick()
+    repeat
+        if tick()-t2 > 5 then return false end
+        task.wait(0.1)
+    until #workspace:GetChildren() >= 5
+    return true
 end
 
 local function hopToServer()
-local startJobId = game.JobId
-local hopStart = tick()
-print("TRIC TRAC AJ: Hopping from " .. startJobId:sub(1,8) .. "...")
-while game.JobId == startJobId do
-if tick() - hopStart > 30 then
-warn("TRIC TRAC AJ: Hop timeout, force rejoining...")
-pcall(function() TeleportService:Teleport(game.PlaceId) end)
-task.wait(2); hopStart = tick(); startJobId = game.JobId
-end
-local servers = {}
-local ok, result = pcall(function()
-return game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
-end)
-if ok and result then
-pcall(function() servers = (HttpService:JSONDecode(result) or {}).data or {} end)
-end
-local found = false
-for _, s in ipairs(servers) do
-if s.id and s.id ~= game.JobId and s.playing <= (s.maxPlayers - 2) then
-print("TRIC TRAC AJ: Teleporting (" .. s.playing .. "/" .. s.maxPlayers .. ")")
-pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id) end)
-found = true; break
-end
-end
-if not found then
-warn("TRIC TRAC AJ: No free servers, rejoining...")
-pcall(function() TeleportService:Teleport(game.PlaceId) end)
-end
-task.wait(2)
-end
-print("TRIC TRAC AJ: Server changed -> " .. game.JobId:sub(1,8))
+    local startJobId = game.JobId
+    local hopStart = tick()
+    print("TRIC TRAC AJ: Hopping from " .. startJobId:sub(1,8) .. "...")
+    while game.JobId == startJobId do
+        if tick() - hopStart > 30 then
+            warn("TRIC TRAC AJ: Hop timeout, force rejoining...")
+            pcall(function() TeleportService:Teleport(game.PlaceId) end)
+            task.wait(2); hopStart = tick(); startJobId = game.JobId
+        end
+        local servers = {}
+        local ok, result = pcall(function()
+            return game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
+        end)
+        if ok and result then
+            pcall(function() servers = (HttpService:JSONDecode(result) or {}).data or {} end)
+        end
+        local found = false
+        for _, s in ipairs(servers) do
+            if s.id and s.id ~= game.JobId and s.playing <= (s.maxPlayers - 2) then
+                print("TRIC TRAC AJ: Teleporting (" .. s.playing .. "/" .. s.maxPlayers .. ")")
+                pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id) end)
+                found = true; break
+            end
+        end
+        if not found then
+            warn("TRIC TRAC AJ: No free servers, rejoining...")
+            pcall(function() TeleportService:Teleport(game.PlaceId) end)
+        end
+        task.wait(2)
+    end
+    print("TRIC TRAC AJ: Server changed -> " .. game.JobId:sub(1,8))
 end
 
 local scanComplete = false
@@ -601,43 +607,43 @@ local lastSentKey = ""
 local serverJoinTime = tick()
 
 local function performScan()
-scanComplete = false; hopReady = false
-currentServerId = game.JobId
-print("TRIC TRAC AJ: Loading...")
-if not waitForGameLoad(15) then
-print("TRIC TRAC AJ: Load timeout"); scanComplete=true; hopReady=true; return
-end
-local jobWait = tick()
-while (game.JobId == "" or #game.JobId < 30) and tick()-jobWait < 10 do task.wait(0.1) end
-currentServerId = game.JobId
-if not currentServerId or #currentServerId < 30 then
-print("TRIC TRAC AJ: Invalid server"); scanComplete=true; hopReady=true; return
-end
-local t = tick()
-repeat
-task.wait(0.2)
-if isStuckOnLoading() then print("TRIC TRAC AJ: Stuck"); scanComplete=true; hopReady=true; return end
-if tick()-t > 12 then print("TRIC TRAC AJ: Plots timeout"); scanComplete=true; hopReady=true; return end
-until workspace:FindFirstChild("Plots")
-task.wait(0.1)
-print("TRIC TRAC AJ: Scanning for 25 seconds...")
-local serverSentKeys = {}
-while tick() - serverJoinTime < 25 do
-local allHits, best = scanAllBrainrots()
-if best then
-local sendKey = best.name .. "|" .. currentServerId
-if not serverSentKeys[sendKey] and sendKey ~= lastSentKey then
-serverSentKeys[sendKey] = true
-lastSentKey = sendKey
-print("TRIC TRAC AJ: HIT -> " .. best.name .. " " .. best.generation)
-sendDiscord(allHits, best, currentServerId)
-sendWebSocket(best, currentServerId)
-end
-end
-task.wait(0.1)
-end
-print("TRIC TRAC AJ: 25s done, hopping...")
-scanComplete = true; hopReady = true
+    scanComplete = false; hopReady = false
+    currentServerId = game.JobId
+    print("TRIC TRAC AJ: Loading...")
+    if not waitForGameLoad(15) then
+        print("TRIC TRAC AJ: Load timeout"); scanComplete=true; hopReady=true; return
+    end
+    local jobWait = tick()
+    while (game.JobId == "" or #game.JobId < 30) and tick()-jobWait < 10 do task.wait(0.1) end
+    currentServerId = game.JobId
+    if not currentServerId or #currentServerId < 30 then
+        print("TRIC TRAC AJ: Invalid server"); scanComplete=true; hopReady=true; return
+    end
+    local t = tick()
+    repeat
+        task.wait(0.2)
+        if isStuckOnLoading() then print("TRIC TRAC AJ: Stuck"); scanComplete=true; hopReady=true; return end
+        if tick()-t > 12 then print("TRIC TRAC AJ: Plots timeout"); scanComplete=true; hopReady=true; return end
+    until workspace:FindFirstChild("Plots")
+    task.wait(0.5)
+    print("TRIC TRAC AJ: Scanning for 35 seconds...")
+    local serverSentKeys = {}
+    while tick() - serverJoinTime < 35 do
+        local allHits, best = scanAllBrainrots()
+        if best then
+            local sendKey = best.name .. "|" .. currentServerId
+            if not serverSentKeys[sendKey] and sendKey ~= lastSentKey then
+                serverSentKeys[sendKey] = true
+                lastSentKey = sendKey
+                print("TRIC TRAC AJ: HIT -> " .. best.name .. " " .. best.generation)
+                sendDiscord(allHits, best, currentServerId)
+                sendWebSocket(best, currentServerId)
+            end
+        end
+        task.wait(0.1)
+    end
+    print("TRIC TRAC AJ: 35s done, hopping...")
+    scanComplete = true; hopReady = true
 end
 
 connectWebSocket()
@@ -646,41 +652,42 @@ task.spawn(performScan)
 local stuckStartTime = nil
 
 task.spawn(function()
-while true do
-repeat task.wait(0.05) until scanComplete and hopReady
-print("TRIC TRAC AJ: Hopping to next server...")
-hopToServer()
-serverJoinTime = tick()
-task.spawn(performScan)
-end
+    while true do
+        repeat task.wait(0.05) until scanComplete and hopReady
+        print("TRIC TRAC AJ: Hopping to next server...")
+        hopToServer()
+        serverJoinTime = tick()
+        task.spawn(performScan)
+    end
 end)
 
 task.spawn(function()
-while true do
-task.wait(3)
-if not scanComplete then
-if isStuckOnLoading() then
-if not stuckStartTime then stuckStartTime = tick()
-elseif tick() - stuckStartTime > 10 then
-print("TRIC TRAC AJ: Load stuck, forcing...")
-stuckStartTime = nil; scanComplete = true; hopReady = true
-end
-else stuckStartTime = nil end
-else stuckStartTime = nil end
-end
+    while true do
+        task.wait(3)
+        if not scanComplete then
+            if isStuckOnLoading() then
+                if not stuckStartTime then stuckStartTime = tick()
+                elseif tick() - stuckStartTime > 10 then
+                    print("TRIC TRAC AJ: Load stuck, forcing...")
+                    stuckStartTime = nil; scanComplete = true; hopReady = true
+                end
+            else stuckStartTime = nil end
+        else stuckStartTime = nil end
+    end
 end)
 
 TeleportService.TeleportInitFailed:Connect(function()
-print("TRIC TRAC AJ: Teleport failed, retrying...")
-scanComplete = true; hopReady = true
+    print("TRIC TRAC AJ: Teleport failed, retrying...")
+    scanComplete = true; hopReady = true
 end)
 
+-- ── GUI ───────────────────────────────────────────────────────────────────────
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local GuiName = "TricTracAj"
 for _, v in pairs(CoreGui:GetChildren()) do
-if v.Name == GuiName then v:Destroy() end
+    if v.Name == GuiName then v:Destroy() end
 end
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = GuiName
@@ -702,16 +709,16 @@ frameStroke.Thickness = 1.5
 
 local dragging, dragStart, startPos = false, nil, nil
 Frame.InputBegan:Connect(function(input)
-if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-dragging = true; dragStart = input.Position; startPos = Frame.Position
-input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
-end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = input.Position; startPos = Frame.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
 end)
 UserInputService.InputChanged:Connect(function(input)
-if dragging and dragStart and startPos and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-local delta = input.Position - dragStart
-Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+delta.X, startPos.Y.Scale, startPos.Y.Offset+delta.Y)
-end
+    if dragging and dragStart and startPos and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+delta.X, startPos.Y.Scale, startPos.Y.Offset+delta.Y)
+    end
 end)
 
 local Title = Instance.new("TextLabel", Frame)
@@ -723,6 +730,7 @@ Title.Text = "TRIC TRAC AJ"
 Title.TextColor3 = Color3.fromRGB(140, 255, 150)
 Title.TextSize = 18
 
+-- Min Value input box
 local minLabel = Instance.new("TextLabel", Frame)
 minLabel.BackgroundTransparency = 1
 minLabel.Position = UDim2.new(0, 15, 0, 40)
@@ -745,10 +753,10 @@ valBox.TextSize = 12
 Instance.new("UICorner", valBox).CornerRadius = UDim.new(0, 6)
 Instance.new("UIStroke", valBox).Color = Color3.fromRGB(70, 210, 90)
 valBox.FocusLost:Connect(function()
-local num = tonumber(valBox.Text)
-if num and num > 0 then MIN_GENERATION = num else MIN_GENERATION = 10 end
-valBox.Text = tostring(MIN_GENERATION)
-saveConfig()
+    local num = tonumber(valBox.Text)
+    if num and num > 0 then MIN_GENERATION = num else MIN_GENERATION = 10 end
+    valBox.Text = tostring(MIN_GENERATION)
+    saveConfig()
 end)
 
 local status = Instance.new("TextLabel", Frame)
@@ -778,24 +786,26 @@ closeBtn.TextColor3 = Color3.fromRGB(255, 70, 70)
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextSize = 14
 closeBtn.MouseButton1Click:Connect(function()
-ScreenGui:Destroy()
+    ScreenGui:Destroy()
 end)
 
 task.spawn(function()
-while true do
-task.wait(1)
-if not ws then connectWebSocket() end
-end
+    while true do
+        task.wait(1)
+        if not ws then connectWebSocket() end
+    end
 end)
 
 task.spawn(function()
-while true do
-local state = scanComplete and "Done" or "Scanning"
-status.Text = string.format("Min: %sM/s | %s | Server: %s",
-tostring(MIN_GENERATION),
-state,
-currentServerId and currentServerId:sub(1,6) or "???"
-)
-task.wait(0.5)
-end
+    while true do
+        local state = scanComplete and "Done" or "Scanning"
+        status.Text = string.format("Min: %sM/s | %s | Server: %s",
+            tostring(MIN_GENERATION),
+            state,
+            currentServerId and currentServerId:sub(1,6) or "???"
+        )
+        task.wait(0.5)
+    end
 end)
+
+print("TRIC TRAC AJ: Loaded! Worker = " .. USERNAME)
